@@ -20,12 +20,12 @@
         #secret-img { width: 100%; height: 100%; object-fit: cover; filter: blur(50px) brightness(0); transition: 1s; }
         .shake { animation: shake 0.3s ease-in-out; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-10px); } 40%, 80% { transform: translateX(10px); } }
-        
+
         #start-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; overflow-y: auto; padding: 20px; }
         .btn-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 20px; max-width: 600px; }
         button { padding: 15px; font-size: 16px; background: #00ffcc; border: none; cursor: pointer; font-weight: bold; border-radius: 5px; transition: 0.2s; color: #000; }
         button:hover { background: #fff; transform: scale(1.05); }
-        
+
         /* Level Colors */
         .lv1 { background: #00ff88; } .lv2 { background: #88ff00; }
         .lv3 { background: #ccff00; } .lv4 { background: #ffff00; }
@@ -37,7 +37,7 @@
 
 <div id="start-screen">
     <h1>WORLD ELIMINATION</h1>
-    <p>Select a difficulty level based on country size and count</p>
+    <p>Select a difficulty level to begin. A random image will be revealed as you find countries.</p>
     <div class="btn-grid">
         <button class="lv1" onclick="initGame(1)">Level 1: Super Giants (Top 10)</button>
         <button class="lv2" onclick="initGame(2)">Level 2: Large Nations (Top 25)</button>
@@ -56,7 +56,7 @@
         <span id="stats">SCORE: <b id="score">0</b> | TIME: <b id="timer">60</b>s</span>
     </div>
     <div id="reveal-container">
-        <img id="secret-img" src="https://picsum.photos/1200/800?world" alt="Secret">
+        <img id="secret-img" src="" alt="Secret">
     </div>
 </div>
 
@@ -73,21 +73,28 @@
 
     svg.call(d3.zoom().scaleExtent([1, 40]).on("zoom", (e) => g.attr("transform", e.transform)));
 
+    // Load ISO names
     d3.json("https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/slim-3/slim-3.json").then(data => {
         data.forEach(c => nameMap[parseInt(c["country-code"]).toString().padStart(3, '0')] = c.name);
     });
 
     function initGame(level) {
+        // --- RANDOM IMAGE SELECTION ---
+        // Generates a number between 1 and 12, then formats to "01", "02", etc.
+        const randomImgNum = Math.floor(Math.random() * 12) + 1;
+        const imgPath = "random/" + randomImgNum.toString().padStart(2, '0') + ".jpg";
+        document.getElementById('secret-img').src = imgPath;
+        // ------------------------------
+
         document.getElementById('start-screen').style.display = 'none';
-        
+
         d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
             let countries = topojson.feature(data, data.objects.countries).features;
-            
+
             countries = countries.filter(d => nameMap[parseInt(d.id).toString().padStart(3, '0')]);
             countries.forEach(d => d.area = d3.geoArea(d));
             countries.sort((a, b) => b.area - a.area);
 
-            // Define 8 tiers based on rank
             const tiers = { 1: 10, 2: 25, 3: 50, 4: 75, 5: 100, 6: 130, 7: 160, 8: countries.length };
             pool = countries.slice(0, tiers[level]);
 
@@ -109,20 +116,22 @@
     }
 
     function nextQuestion() {
-        if (pool.length === 0) { alert("VICTORY!"); location.reload(); return; }
+        if (pool.length === 0) { alert("VICTORY! The image is revealed."); location.reload(); return; }
         const index = Math.floor(Math.random() * pool.length);
         currentTarget = pool[index];
-        document.getElementById('target').innerText = nameMap[parseInt(currentTarget.id).toString().padStart(3, '0')].toUpperCase();
+        const countryName = nameMap[parseInt(currentTarget.id).toString().padStart(3, '0')] || "Unknown";
+        document.getElementById('target').innerText = countryName.toUpperCase();
     }
 
     function checkSelection(data, element) {
         if (data.id === currentTarget.id) {
-            score += 25; timeLeft += 7;
+            score += 25;
+            timeLeft += 7;
             pool = pool.filter(c => c.id !== data.id);
             d3.select(element).classed("found", true);
             nextQuestion();
         } else {
-            timeLeft -= 12;
+            timeLeft -= 2;
             document.getElementById('game-canvas').classList.add('shake');
             d3.select(element).classed("wrong-flash", true);
             setTimeout(() => {
@@ -135,14 +144,21 @@
 
     function updateUI() {
         document.getElementById('score').innerText = score;
-        const blur = Math.max(0, 50 - (score / 10));
-        const bright = Math.min(1, score / 500);
-        document.getElementById('secret-img').style.filter = `blur(${blur}px) brightness(${bright})`;
+        // Logic: Reveal image based on score.
+        // 500 score (20 correct countries) results in 0 blur and 1.0 brightness.
+        const blurAmount = Math.max(0, 50 - (score / 10));
+        const brightnessAmount = Math.min(1, score / 500);
+        document.getElementById('secret-img').style.filter = `blur(${blurAmount}px) brightness(${brightnessAmount})`;
     }
 
     function timerLoop() {
         const interval = setInterval(() => {
-            if (timeLeft <= 0) { clearInterval(interval); gameActive = false; alert("Game Over! Score: " + score); location.reload(); }
+            if (timeLeft <= 0) {
+                clearInterval(interval);
+                gameActive = false;
+                alert("Game Over! Score: " + score);
+                location.reload();
+            }
             timeLeft--;
             document.getElementById('timer').innerText = timeLeft;
         }, 1000);
