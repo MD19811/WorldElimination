@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WORLD ELIMINATION</title>
+     <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; color: #00bfff; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 20px; box-sizing: border-box; }
+        #header { background: rgba(0, 10, 20, 0.9); padding: 15px 40px; border: 2px solid #00bfff; border-radius: 10px; pointer-events: auto; text-align: center; box-shadow: 0 0 20px rgba(0, 191, 255, 0.3); }
+        #target { font-size: 36px; font-weight: bold; color: #fff; text-shadow: 0 0 10px #00bfff; }
+        #game-canvas { width: 100vw; height: 100vh; background: #050505; }
+        .country { fill: #1a1a1a; stroke: #333; stroke-width: 0.5px; transition: 0.3s; cursor: pointer; }
+        .country:hover { fill: #003366; }
+        .wrong-flash { fill: #ff0000 !important; }
+        .found { fill: transparent !important; stroke: none !important; pointer-events: none !important; }
+        #reveal-container { position: absolute; bottom: 20px; right: 20px; width: 300px; height: 500px; border: 4px solid #00bfff; background: #000; overflow: hidden; pointer-events: none; box-shadow: 0 0 15px #00bfff; }
+        #secret-img { width: 100%; height: 100%; object-fit: cover; filter: blur(50px) brightness(0); transition: 0.5s ease-out; }
+        .shake { animation: shake 0.3s ease-in-out; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-10px); } 40%, 80% { transform: translateX(10px); } }
+
+        #start-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,1); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; padding: 20px; }
+        .logo-img { max-width: 400px; margin-bottom: 20px; border-radius: 50%; border: 2px solid #00bfff; }
+        .btn-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 20px; max-width: 800px; }
+        button { padding: 15px; font-size: 14px; border: none; cursor: pointer; font-weight: bold; border-radius: 5px; transition: 0.2s; color: #fff; text-transform: uppercase; }
+        button:hover { transform: scale(1.05); filter: brightness(1.2); outline: 2px solid #fff; }
+
+        /* Level Colors (The Blue Palette) */
+        .lv1 { background: #f0f8ff; color: #000; }
+        .lv2 { background: #87cefa; color: #000; }
+        .lv3 { background: #00bfff; color: #000; }
+        .lv4 { background: #6495ed; }
+        .lv5 { background: #4169e1; }
+        .lv6 { background: #0000ff; }
+        .lv7 { background: #000080; }
+        .lv8 { background: #191970; }
+    </style>
+</head>
+<body>
+
+<div id="start-screen">
+     <div class="globe-container">
+		            <img src="logo2.jpg" alt="Globe" class="globe-img">
+        </div>
+    <h3>SELECT DIFFICULTY TO START THE ELIMINATION</h3>
+    <div class="btn-grid">
+        <button class="lv1" onclick="initGame(1)">Level 1: Super Giants (20)</button>
+        <button class="lv2" onclick="initGame(2)">Level 2: Large Nations (35)</button>
+        <button class="lv3" onclick="initGame(3)">Level 3: Major Countries (50)</button>
+        <button class="lv4" onclick="initGame(4)">Level 4: Standard Map (75)</button>
+        <button class="lv5" onclick="initGame(5)">Level 5: Intermediate (100)</button>
+        <button class="lv6" onclick="initGame(6)">Level 6: Advanced (130)</button>
+        <button class="lv7" onclick="initGame(7)">Level 7: Expert (160)</button>
+        <button class="lv8" onclick="initGame(8)">Level 8: Insane (Global)</button>
+    </div>
+</div>
+
+<div id="ui-layer">
+    <div id="header">
+        FIND: <span id="target">---</span><br>
+        <span id="stats">SCORE: <b id="score">0</b> | TIME: <b id="timer">60</b>s</span>
+    </div>
+    <div id="reveal-container">
+        <img id="secret-img" src="" alt="Secret">
+    </div>
+</div>
+
+<svg id="game-canvas"></svg>
+
+<script>
+    let score = 0, timeLeft = 60, pool = [], currentTarget = null, gameActive = false;
+    let targetScoreForLevel = 500;
+    const nameMap = {};
+
+    const svg = d3.select("#game-canvas");
+    const g = svg.append("g");
+    const projection = d3.geoMercator().scale(150).translate([window.innerWidth / 2, window.innerHeight / 1.6]);
+    const path = d3.geoPath().projection(projection);
+
+    svg.call(d3.zoom().scaleExtent([1, 40]).on("zoom", (e) => g.attr("transform", e.transform)));
+
+    // Load ISO names
+    d3.json("https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/slim-3/slim-3.json").then(data => {
+        data.forEach(c => nameMap[parseInt(c["country-code"]).toString().padStart(3, '0')] = c.name);
+    });
+
+    function initGame(level) {
+        const randomImgNum = Math.floor(Math.random() * 20) + 1;
+        const imgPath = "randomF/" + randomImgNum.toString().padStart(2, '0') + ".jpg";
+        document.getElementById('secret-img').src = imgPath;
+
+        document.getElementById('start-screen').style.display = 'none';
+
+        d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
+            let countries = topojson.feature(data, data.objects.countries).features;
+            countries = countries.filter(d => nameMap[parseInt(d.id).toString().padStart(3, '0')]);
+            countries.forEach(d => d.area = d3.geoArea(d));
+            countries.sort((a, b) => b.area - a.area);
+
+            const tiers = { 1: 20, 2: 35, 3: 50, 4: 75, 5: 100, 6: 130, 7: 160, 8: countries.length };
+            pool = countries.slice(0, tiers[level]);
+
+            // Set dynamic reveal goal: 25 points per country in pool
+            targetScoreForLevel = pool.length * 25;
+
+            g.selectAll("path")
+                .data(countries)
+                .enter().append("path")
+                .attr("class", "country")
+                .attr("d", path)
+                .style("display", d => pool.find(p => p.id === d.id) ? "block" : "none")
+                .on("click", function(event, d) {
+                    if(!gameActive) return;
+                    checkSelection(d, this);
+                });
+
+            gameActive = true;
+            nextQuestion();
+            timerLoop();
+        });
+    }
+
+    function nextQuestion() {
+        if (pool.length === 0) {
+            gameActive = false;
+            // Immediate full reveal
+            const finalImg = document.getElementById('secret-img');
+            finalImg.style.filter = "blur(0px) brightness(1)";
+
+            setTimeout(() => {
+                alert("VICTORY! The world has been eliminated!");
+                location.reload();
+            }, 500);
+            return;
+        }
+        const index = Math.floor(Math.random() * pool.length);
+        currentTarget = pool[index];
+        const countryName = nameMap[parseInt(currentTarget.id).toString().padStart(3, '0')] || "Unknown";
+        document.getElementById('target').innerText = countryName.toUpperCase();
+    }
+
+    function checkSelection(data, element) {
+        if (data.id === currentTarget.id) {
+            score += 25;
+            timeLeft += 7;
+            pool = pool.filter(c => c.id !== data.id);
+            d3.select(element).classed("found", true);
+            nextQuestion();
+        } else {
+            timeLeft -= 2;
+            document.getElementById('game-canvas').classList.add('shake');
+            d3.select(element).classed("wrong-flash", true);
+            setTimeout(() => {
+                document.getElementById('game-canvas').classList.remove('shake');
+                d3.select(element).classed("wrong-flash", false);
+            }, 300);
+        }
+        updateUI();
+    }
+
+    function updateUI() {
+        document.getElementById('score').innerText = score;
+        // Calculate progress toward the level's target score
+        const progress = Math.min(1, score / targetScoreForLevel);
+        const blurAmount = Math.max(0, 50 - (score / 10));
+       const brightnessAmount = Math.min(1, score / 500);
+        document.getElementById('secret-img').style.filter = `blur(${blurAmount}px) brightness(${brightnessAmount})`;
+    }
+
+    function timerLoop() {
+        const interval = setInterval(() => {
+            if (timeLeft <= 0) {
+                clearInterval(interval);
+                if(gameActive) {
+                    gameActive = false;
+                    alert("Elimination Failed! Score: " + score);
+                    location.reload();
+                }
+            }
+            if(gameActive) {
+                timeLeft--;
+                document.getElementById('timer').innerText = timeLeft;
+            } else {
+                clearInterval(interval);
+            }
+        }, 1000);
+    }
+</script>
+</body>
+</html>
